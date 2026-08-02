@@ -7,7 +7,6 @@ from sqlalchemy import create_engine, Column, String, Float
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
-# 1. Drošs lokālās datubāzes dzinējs
 DATABASE_URL = "sqlite:///./batteries.db"
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 
@@ -21,7 +20,7 @@ class BatteryModel(Base):
     model = Column(String)
     manufacturer = Column(String)
     chemistry = Column(String)
-    carbon_footprint = Column(String) # Pārveidots par string, lai atbilstu paraugam
+    carbon_footprint = Column(String)
     manufacturing_date = Column(String)
     status = Column(String)
 
@@ -33,18 +32,10 @@ app = FastAPI(title="Battery DPP API")
 def read_root():
     return {"message": "Bateriju sistēma darbojas. Atver /battery/{id}/scan"}
 
-# Funkcija, kas ģenerē atbilstošu HTML krāsu kodam
-def get_class_color(carbon_class):
-    if carbon_class == "A": return "#008738"
-    if carbon_class == "B": return "#FFC107" # Oranžs/Dzeltens
-    return "#666" # Neitrāls
-
-# JAUNAIS VIZUĀLAIS SKATS (atbilstoši image_0.png)
 @app.get("/battery/{battery_id}/scan", response_class=HTMLResponse)
 def scan_page(battery_id: str, request: Request):
     db = SessionLocal()
     try:
-        # Ja baterijas nav, mēs to uzreiz izveidojam ar parauga datiem
         battery = db.query(BatteryModel).filter(BatteryModel.battery_id == battery_id).first()
         if not battery:
             battery = BatteryModel(
@@ -52,21 +43,16 @@ def scan_page(battery_id: str, request: Request):
                 model="Li-Ion Industrial Pack 48V | ID: BAT-2026-X984",
                 manufacturer="SIA TehnoParts",
                 chemistry="Litija dzelzs fosfāts (LiFePO4), 15% otrreizēji pārstrādāti materiāli",
-                carbon_footprint="B kase (apzināts visā dzīves ciklā, verificēts)",
+                carbon_footprint="B klase (apzināts visā dzīves ciklā, verificēts)",
                 manufacturing_date="Droša izjaukšana pēc rokasgrāmatas 4B, 100% otrreizēji pārstrādājams",
-                status="Aktīva (Atbilst EN 62619)" # Pievienojām statusu kā atbilstošu norādi
+                status="100 Ah / 4.8 kWh, 3500 uzlādes cikli, atbilst EN 62619"
             )
             db.add(battery)
             db.commit()
             db.refresh(battery)
         
-        # Automātiski paņem pašreizējo servera adresi, lai QR kods būtu pareizs
         base_url = str(request.base_url).rstrip("/")
         qr_img_endpoint = f"/battery/{battery_id}/qrcode"
-        
-        # Definējam krāsu klasei
-        carbon_class = battery.carbon_footprint.split(" ")[0]
-        class_color = get_class_color(carbon_class)
 
         html_content = f"""
         <!DOCTYPE html>
@@ -90,32 +76,28 @@ def scan_page(battery_id: str, request: Request):
                     box-sizing: border-box;
                 }}
 
-                /* HEADER */
                 h1 {{ font-size: 22px; font-weight: 700; color: #1a1a1a; letter-spacing: 1px; margin: 0 0 5px 0; }}
-                .subtitle {{ font-size: 11px; color: #555; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 30px; border-bottom: 1px solid #333; display: inline-block; padding-bottom: 5px;}
+                .subtitle {{ font-size: 11px; color: #555; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 30px; border-bottom: 1px solid #333; display: inline-block; padding-bottom: 5px; }}
 
-                /* CONTENT BOXES */
                 .section-title {{ font-size: 14px; font-weight: 700; color: #1a1a1a; text-transform: uppercase; text-align: left; margin-bottom: 15px; }}
                 .data-box {{ background: #f9f9f8; border-radius: 6px; padding: 25px; margin-bottom: 30px; border: 1px solid #eee; }}
-                .data-item {{ text-align: left; font-size: 13.5px; color: #333; margin-bottom: 12px; line-height: 1.5; display: flex;}}
+                .data-item {{ text-align: left; font-size: 13.5px; color: #333; margin-bottom: 12px; line-height: 1.5; display: flex; }}
                 .data-item strong {{ font-weight: 600; margin-right: 5px; }}
                 .item-number {{ font-weight: 700; color: #333; margin-right: 8px; }}
 
-                /* QR CODE */
                 img {{ margin: 20px 0; border: 1px solid #ddd; padding: 5px; border-radius: 4px; background: white; }}
                 .scan-text {{ font-size: 13px; color: #777; margin-bottom: 5px; }}
 
-                /* LOGO FOOTER */
                 .logo-area {{ margin-top: 30px; opacity: 0.6; }}
                 .logo-text {{ font-size: 14px; font-weight: 600; color: #4a4a4a; margin-bottom: 3px; }}
                 .logo-subtext {{ font-size: 9px; color: #7a7a7a; text-transform: uppercase; }}
 
-                @media (max-width: 600px) {
-                    .card { padding: 20px; }
-                    h1 { font-size: 18px; }
-                    .data-item { font-size: 12px; }
-                    .data-box { padding: 15px; }
-                }
+                @media (max-width: 600px) {{
+                    .card {{ padding: 20px; }}
+                    h1 {{ font-size: 18px; }}
+                    .data-item {{ font-size: 12px; }}
+                    .data-box {{ padding: 15px; }}
+                }}
             </style>
         </head>
         <body>
@@ -151,7 +133,6 @@ def scan_page(battery_id: str, request: Request):
 
 @app.get("/battery/{battery_id}/qrcode")
 def generate_qr_code(battery_id: str, request: Request):
-    # Izveido precīzu saiti uz SKENĒŠANAS lapu, neatkarīgi no servera adreses
     base_url = str(request.base_url).rstrip("/")
     data_url = f"{base_url}/battery/{battery_id}/scan"
     
