@@ -1,5 +1,5 @@
 import os
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
 import qrcode
 import io
@@ -7,6 +7,7 @@ from sqlalchemy import create_engine, Column, String, Float
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
+# 1. Drošs lokālās datubāzes dzinējs
 DATABASE_URL = "sqlite:///./batteries.db"
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 
@@ -20,9 +21,9 @@ class BatteryModel(Base):
     model = Column(String)
     manufacturer = Column(String)
     chemistry = Column(String)
-    carbon_footprint = Column(Float)
-    manufacturing_date = Column(String, default="2026-01-01")
-    status = Column(String, default="Active")
+    carbon_footprint = Column(String) # Pārveidots par string, lai atbilstu paraugam
+    manufacturing_date = Column(String)
+    status = Column(String)
 
 Base.metadata.create_all(bind=engine)
 
@@ -30,68 +31,116 @@ app = FastAPI(title="Battery DPP API")
 
 @app.get("/")
 def read_root():
-    return {"message": "Bateriju sistēma darbojas bez kļūdām!"}
+    return {"message": "Bateriju sistēma darbojas. Atver /battery/{id}/scan"}
 
+# Funkcija, kas ģenerē atbilstošu HTML krāsu kodam
+def get_class_color(carbon_class):
+    if carbon_class == "A": return "#008738"
+    if carbon_class == "B": return "#FFC107" # Oranžs/Dzeltens
+    return "#666" # Neitrāls
+
+# JAUNAIS VIZUĀLAIS SKATS (atbilstoši image_0.png)
 @app.get("/battery/{battery_id}/scan", response_class=HTMLResponse)
-def scan_page(battery_id: str):
+def scan_page(battery_id: str, request: Request):
     db = SessionLocal()
     try:
-        # AUTOMĀTISKAIS DROŠĪBAS TĪKLS: Ja baterijas nav, mēs to uzreiz izveidojam demonstrācijai!
+        # Ja baterijas nav, mēs to uzreiz izveidojam ar parauga datiem
         battery = db.query(BatteryModel).filter(BatteryModel.battery_id == battery_id).first()
         if not battery:
             battery = BatteryModel(
                 battery_id=battery_id,
-                model="Demo Litija Baterija X1",
-                manufacturer="EcoBattery SIA",
-                chemistry="NMC (Litija niķeļa mangāna kobalta oksīds)",
-                carbon_footprint=45.5,
-                manufacturing_date="2026-06-01",
-                status="Active"
+                model="Li-Ion Industrial Pack 48V | ID: BAT-2026-X984",
+                manufacturer="SIA TehnoParts",
+                chemistry="Litija dzelzs fosfāts (LiFePO4), 15% otrreizēji pārstrādāti materiāli",
+                carbon_footprint="B kase (apzināts visā dzīves ciklā, verificēts)",
+                manufacturing_date="Droša izjaukšana pēc rokasgrāmatas 4B, 100% otrreizēji pārstrādājams",
+                status="Aktīva (Atbilst EN 62619)" # Pievienojām statusu kā atbilstošu norādi
             )
             db.add(battery)
             db.commit()
             db.refresh(battery)
         
+        # Automātiski paņem pašreizējo servera adresi, lai QR kods būtu pareizs
+        base_url = str(request.base_url).rstrip("/")
         qr_img_endpoint = f"/battery/{battery_id}/qrcode"
-        json_endpoint = f"/battery/{battery_id}"
+        
+        # Definējam krāsu klasei
+        carbon_class = battery.carbon_footprint.split(" ")[0]
+        class_color = get_class_color(carbon_class)
 
         html_content = f"""
         <!DOCTYPE html>
         <html>
         <head>
             <meta charset="utf-8">
-            <title>Baterijas Digitālā Pase - {battery_id}</title>
+            <title>DIGITĀLĀ PRODUKTA PASE - {battery_id}</title>
             <style>
-                body {{ font-family: Arial, sans-serif; text-align: center; background-color: #f4f4f9; padding: 40px; }}
-                .card {{ background: white; padding: 40px; border-radius: 12px; box-shadow: 0px 6px 15px rgba(0,0,0,0.1); display: inline-block; max-width: 450px; width: 100%; }}
-                h2 {{ color: #1a1a1a; margin-bottom: 5px; }}
-                .badge {{ background: #e1ffec; color: #008738; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; display: inline-block; margin-bottom: 15px; }}
-                p {{ color: #555; margin: 8px 0; font-size: 14px; text-align: left; }}
-                .info-box {{ background: #f9f9fb; padding: 15px; border-radius: 8px; margin: 15px 0; border: 1px solid #eee; }}
-                img {{ margin: 15px 0; border: 1px solid #ddd; padding: 10px; border-radius: 8px; background: white; }}
-                .btn {{ display: block; width: 100%; box-sizing: border-box; margin-top: 15px; padding: 12px 0; background: #007BFF; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; text-align: center; }}
-                .btn:hover {{ background: #0056b3; }}
+                @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+                body {{ font-family: 'Inter', sans-serif; text-align: center; background-color: #fbfaf7; margin: 0; padding: 20px; }}
+                .main-container {{ display: flex; flex-direction: column; align-items: center; min-height: 100vh; }}
+                
+                .card {{ 
+                    background: white; 
+                    width: 100%; 
+                    max-width: 650px; 
+                    border-radius: 10px; 
+                    box-shadow: 0px 4px 12px rgba(0,0,0,0.03); 
+                    padding: 40px 20px; 
+                    margin-top: 40px;
+                    box-sizing: border-box;
+                }}
+
+                /* HEADER */
+                h1 {{ font-size: 22px; font-weight: 700; color: #1a1a1a; letter-spacing: 1px; margin: 0 0 5px 0; }}
+                .subtitle {{ font-size: 11px; color: #555; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 30px; border-bottom: 1px solid #333; display: inline-block; padding-bottom: 5px;}
+
+                /* CONTENT BOXES */
+                .section-title {{ font-size: 14px; font-weight: 700; color: #1a1a1a; text-transform: uppercase; text-align: left; margin-bottom: 15px; }}
+                .data-box {{ background: #f9f9f8; border-radius: 6px; padding: 25px; margin-bottom: 30px; border: 1px solid #eee; }}
+                .data-item {{ text-align: left; font-size: 13.5px; color: #333; margin-bottom: 12px; line-height: 1.5; display: flex;}}
+                .data-item strong {{ font-weight: 600; margin-right: 5px; }}
+                .item-number {{ font-weight: 700; color: #333; margin-right: 8px; }}
+
+                /* QR CODE */
+                img {{ margin: 20px 0; border: 1px solid #ddd; padding: 5px; border-radius: 4px; background: white; }}
+                .scan-text {{ font-size: 13px; color: #777; margin-bottom: 5px; }}
+
+                /* LOGO FOOTER */
+                .logo-area {{ margin-top: 30px; opacity: 0.6; }}
+                .logo-text {{ font-size: 14px; font-weight: 600; color: #4a4a4a; margin-bottom: 3px; }}
+                .logo-subtext {{ font-size: 9px; color: #7a7a7a; text-transform: uppercase; }}
+
+                @media (max-width: 600px) {
+                    .card { padding: 20px; }
+                    h1 { font-size: 18px; }
+                    .data-item { font-size: 12px; }
+                    .data-box { padding: 15px; }
+                }
             </style>
         </head>
         <body>
-            <div class="card">
-                <h2>Digitālā Baterijas Pase (DPP)</h2>
-                <div class="badge">ES Regulas prasībām atbilstoša</div>
-                
-                <div class="info-box">
-                    <p>ID numurs: <strong>{battery.battery_id}</strong></p>
-                    <p>Modelis: <strong>{battery.model}</strong></p>
-                    <p>Ražotājs: <strong>{battery.manufacturer}</strong></p>
-                    <p>Ķīmiskais sastāvs: <strong>{battery.chemistry}</strong></p>
-                    <p>Oglekļa pēda: <strong>{battery.carbon_footprint} kg CO2eq</strong></p>
-                    <p>Ražošanas datums: <strong>{battery.manufacturing_date}</strong></p>
-                    <p>Statuss: <strong>{battery.status}</strong></p>
-                </div>
+            <div class="main-container">
+                <div class="card">
+                    <h1>DIGITĀLĀ PRODUKTA PASE</h1>
+                    <div class="subtitle">LIFECYCLEPASSPORT · BATERIJU SPECIFIKĀCIJA</div>
 
-                <p style="text-align: center; font-size: 13px; color: #777;">Noskenē šo QR kodu ar telefonu:</p>
-                <img src="{qr_img_endpoint}" alt="QR Kods" width="200" height="200">
-                
-                <a class="btn" href="{json_endpoint}" target="_blank">Skatīt API JSON datus</a>
+                    <div class="section-title">PRODUKTA SPECIFIKĀCIJA UN DATI</div>
+                    <div class="data-box">
+                        <div class="data-item"><span class="item-number">1.</span><strong>Identifikācija:</strong><span>{battery.model}</span></div>
+                        <div class="data-item"><span class="item-number">2.</span><strong>Materiālu Sastāvs:</strong><span>{battery.chemistry}</span></div>
+                        <div class="data-item"><span class="item-number">3.</span><strong>Veiktspēja un Ilgtspēja:</strong><span>{battery.status}</span></div>
+                        <div class="data-item"><span class="item-number">4.</span><strong>Oglekļa Pēdas Nospiedums:</strong><span>{battery.carbon_footprint}</span></div>
+                        <div class="data-item"><span class="item-number">5.</span><strong>Dzīves Cikls un Utilizācija:</strong><span>{battery.manufacturing_date}</span></div>
+                    </div>
+
+                    <p class="scan-text">Noskenē šo kodu, lai piekļūtu pasei:</p>
+                    <img src="{qr_img_endpoint}" alt="QR Kods" width="180" height="180">
+                    
+                    <div class="logo-area">
+                        <div class="logo-text">LifecyclePassport</div>
+                        <div class="logo-subtext">DYNAMIC LIFECYCLE PATH</div>
+                    </div>
+                </div>
             </div>
         </body>
         </html>
@@ -100,36 +149,15 @@ def scan_page(battery_id: str):
     finally:
         db.close()
 
-@app.get("/battery/{battery_id}")
-def get_battery(battery_id: str):
-    db = SessionLocal()
-    try:
-        battery = db.query(BatteryModel).filter(BatteryModel.battery_id == battery_id).first()
-        if not battery:
-            raise HTTPException(status_code=404, detail="Battery not found")
-        return {
-            "battery_id": battery.battery_id,
-            "model": battery.model,
-            "manufacturer": battery.manufacturer,
-            "chemistry": battery.chemistry,
-            "carbon_footprint": battery.carbon_footprint,
-            "manufacturing_date": battery.manufacturing_date,
-            "status": battery.status
-        }
-    finally:
-        db.close()
-
 @app.get("/battery/{battery_id}/qrcode")
-def generate_qr_code(battery_id: str):
-    db = SessionLocal()
-    try:
-        data_url = f"https://battery-dpp-api-production-a9d8.up.railway.app/battery/{battery_id}/scan"
-        
-        img = qrcode.make(data_url)
-        img_io = io.BytesIO()
-        img.save(img_io, 'PNG')
-        img_io.seek(0)
-        
-        return Response(content=img_io.getvalue(), media_type="image/png")
-    finally:
-        db.close()
+def generate_qr_code(battery_id: str, request: Request):
+    # Izveido precīzu saiti uz SKENĒŠANAS lapu, neatkarīgi no servera adreses
+    base_url = str(request.base_url).rstrip("/")
+    data_url = f"{base_url}/battery/{battery_id}/scan"
+    
+    img = qrcode.make(data_url)
+    img_io = io.BytesIO()
+    img.save(img_io, 'PNG')
+    img_io.seek(0)
+    
+    return Response(content=img_io.getvalue(), media_type="image/png")
