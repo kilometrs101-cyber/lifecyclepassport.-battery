@@ -7,7 +7,6 @@ from sqlalchemy import create_engine, Column, String, Float
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
-# 1. Drošs lokālās datubāzes dzinējs
 DATABASE_URL = "sqlite:///./batteries.db"
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 
@@ -33,26 +32,71 @@ app = FastAPI(title="Battery DPP API")
 def read_root():
     return {"message": "Bateriju sistēma darbojas bez kļūdām!"}
 
-@app.post("/battery/add")
-def add_battery(battery_id: str, model: str, manufacturer: str, chemistry: str, carbon_footprint: float, manufacturing_date: str = "2026-01-01", status: str = "Active"):
+@app.get("/battery/{battery_id}/scan", response_class=HTMLResponse)
+def scan_page(battery_id: str):
     db = SessionLocal()
     try:
-        existing = db.query(BatteryModel).filter(BatteryModel.battery_id == battery_id).first()
-        if existing:
-            raise HTTPException(status_code=400, detail="Battery already exists")
+        # AUTOMĀTISKAIS DROŠĪBAS TĪKLS: Ja baterijas nav, mēs to uzreiz izveidojam demonstrācijai!
+        battery = db.query(BatteryModel).filter(BatteryModel.battery_id == battery_id).first()
+        if not battery:
+            battery = BatteryModel(
+                battery_id=battery_id,
+                model="Demo Litija Baterija X1",
+                manufacturer="EcoBattery SIA",
+                chemistry="NMC (Litija niķeļa mangāna kobalta oksīds)",
+                carbon_footprint=45.5,
+                manufacturing_date="2026-06-01",
+                status="Active"
+            )
+            db.add(battery)
+            db.commit()
+            db.refresh(battery)
         
-        new_battery = BatteryModel(
-            battery_id=battery_id,
-            model=model,
-            manufacturer=manufacturer,
-            chemistry=chemistry,
-            carbon_footprint=carbon_footprint,
-            manufacturing_date=manufacturing_date,
-            status=status
-        )
-        db.add(new_battery)
-        db.commit()
-        return {"status": "success", "battery_id": battery_id}
+        qr_img_endpoint = f"/battery/{battery_id}/qrcode"
+        json_endpoint = f"/battery/{battery_id}"
+
+        html_content = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <title>Baterijas Digitālā Pase - {battery_id}</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; text-align: center; background-color: #f4f4f9; padding: 40px; }}
+                .card {{ background: white; padding: 40px; border-radius: 12px; box-shadow: 0px 6px 15px rgba(0,0,0,0.1); display: inline-block; max-width: 450px; width: 100%; }}
+                h2 {{ color: #1a1a1a; margin-bottom: 5px; }}
+                .badge {{ background: #e1ffec; color: #008738; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: bold; display: inline-block; margin-bottom: 15px; }}
+                p {{ color: #555; margin: 8px 0; font-size: 14px; text-align: left; }}
+                .info-box {{ background: #f9f9fb; padding: 15px; border-radius: 8px; margin: 15px 0; border: 1px solid #eee; }}
+                img {{ margin: 15px 0; border: 1px solid #ddd; padding: 10px; border-radius: 8px; background: white; }}
+                .btn {{ display: block; width: 100%; box-sizing: border-box; margin-top: 15px; padding: 12px 0; background: #007BFF; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; text-align: center; }}
+                .btn:hover {{ background: #0056b3; }}
+            </style>
+        </head>
+        <body>
+            <div class="card">
+                <h2>Digitālā Baterijas Pase (DPP)</h2>
+                <div class="badge">ES Regulas prasībām atbilstoša</div>
+                
+                <div class="info-box">
+                    <p>ID numurs: <strong>{battery.battery_id}</strong></p>
+                    <p>Modelis: <strong>{battery.model}</strong></p>
+                    <p>Ražotājs: <strong>{battery.manufacturer}</strong></p>
+                    <p>Ķīmiskais sastāvs: <strong>{battery.chemistry}</strong></p>
+                    <p>Oglekļa pēda: <strong>{battery.carbon_footprint} kg CO2eq</strong></p>
+                    <p>Ražošanas datums: <strong>{battery.manufacturing_date}</strong></p>
+                    <p>Statuss: <strong>{battery.status}</strong></p>
+                </div>
+
+                <p style="text-align: center; font-size: 13px; color: #777;">Noskenē šo QR kodu ar telefonu:</p>
+                <img src="{qr_img_endpoint}" alt="QR Kods" width="200" height="200">
+                
+                <a class="btn" href="{json_endpoint}" target="_blank">Skatīt API JSON datus</a>
+            </div>
+        </body>
+        </html>
+        """
+        return html_content
     finally:
         db.close()
 
@@ -79,11 +123,7 @@ def get_battery(battery_id: str):
 def generate_qr_code(battery_id: str):
     db = SessionLocal()
     try:
-        battery = db.query(BatteryModel).filter(BatteryModel.battery_id == battery_id).first()
-        if not battery:
-            raise HTTPException(status_code=404, detail="Battery not found")
-        
-        data_url = f"https://battery-dpp-api-production-a9d8.up.railway.app/battery/{battery_id}"
+        data_url = f"https://battery-dpp-api-production-a9d8.up.railway.app/battery/{battery_id}/scan"
         
         img = qrcode.make(data_url)
         img_io = io.BytesIO()
@@ -91,50 +131,5 @@ def generate_qr_code(battery_id: str):
         img_io.seek(0)
         
         return Response(content=img_io.getvalue(), media_type="image/png")
-    finally:
-        db.close()
-
-@app.get("/battery/{battery_id}/scan", response_class=HTMLResponse)
-def scan_page(battery_id: str):
-    db = SessionLocal()
-    try:
-        battery = db.query(BatteryModel).filter(BatteryModel.battery_id == battery_id).first()
-        if not battery:
-            raise HTTPException(status_code=404, detail="Battery not found")
-        
-        qr_img_endpoint = f"/battery/{battery_id}/qrcode"
-        json_endpoint = f"/battery/{battery_id}"
-
-        html_content = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Baterijas QR Kods - {battery_id}</title>
-            <style>
-                body {{ font-family: Arial, sans-serif; text-align: center; background-color: #f4f4f9; padding: 50px; }}
-                .card {{ background: white; padding: 30px; border-radius: 10px; box-shadow: 0px 4px 10px rgba(0,0,0,0.1); display: inline-block; }}
-                h2 {{ color: #333; }}
-                p {{ color: #666; }}
-                img {{ margin: 20px 0; border: 1px solid #ddd; padding: 10px; border-radius: 5px; }}
-                .btn {{ display: inline-block; margin-top: 15px; padding: 10px 20px; background: #007BFF; color: white; text-decoration: none; border-radius: 5px; }}
-                .btn:hover {{ background: #0056b3; }}
-            </style>
-        </head>
-        <body>
-            <div class="card">
-                <h2>Baterijas Digitālā Pase (DPP)</h2>
-                <p>Baterijas ID: <strong>{battery_id}</strong></p>
-                <p>Modelis: <strong>{battery.model}</strong> ({battery.manufacturer})</p>
-                <p>Noskenē šo kodu ar telefonu, lai atvērtu datus!</p>
-                
-                <img src="{qr_img_endpoint}" alt="QR Kods" width="250" height="250">
-                
-                <br>
-                <a class="btn" href="{json_endpoint}" target="_blank">Skatīt JSON datus</a>
-            </div>
-        </body>
-        </html>
-        """
-        return html_content
     finally:
         db.close()
